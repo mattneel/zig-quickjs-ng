@@ -15,9 +15,14 @@ generating slop here.
 ## Example
 
 ```zig
+const std = @import("std");
 const quickjs = @import("quickjs");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
     const rt: *quickjs.Runtime = try .init();
     defer rt.deinit();
 
@@ -35,7 +40,8 @@ pub fn main() !void {
     }
 
     const value = try result.toInt32(ctx);
-    std.debug.assert(value == 42);
+    try stdout.print("Result: {d}\n", .{value});
+    try stdout.flush();
 }
 ```
 
@@ -69,28 +75,31 @@ In your `build.zig`:
 ```zig
 const std = @import("std");
 
-pub fn build(b: *std.Build) !void {
+pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{
-        .name = "my-app",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // Get the quickjs dependency
     const dep = b.dependency("quickjs", .{
         .target = target,
         .optimize = optimize,
     });
 
-    // Add the Zig module
-    exe.root_module.addImport("quickjs", dep.module("quickjs"));
+    const exe = b.addExecutable(.{
+        .name = "my-app",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{
+                .name = "quickjs",
+                .module = dep.module("quickjs"),
+            }},
+        }),
+        // Zig 0.16 fails with splitType errors without LLVM.
+        .use_llvm = true,
+    });
 
-    // Link the C library
-    exe.linkLibrary(dep.artifact("quickjs-ng"));
+    exe.root_module.linkLibrary(dep.artifact("quickjs-ng"));
 
     b.installArtifact(exe);
 }

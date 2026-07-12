@@ -97,7 +97,11 @@ const Logger = struct {
     }
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
     const rt: *quickjs.Runtime = try .init();
     defer rt.deinit();
 
@@ -128,5 +132,6 @@ pub fn main() !void {
         return error.JavaScriptException;
     }
 
-    std.debug.print("Logging complete!\n", .{});
+    try stdout.print("Logging complete!\n", .{});
+    try stdout.flush();
 }

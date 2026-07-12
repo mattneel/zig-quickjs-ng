@@ -72,7 +72,11 @@ fn runPendingJobs(rt: *quickjs.Runtime) !void {
     while (rt.isJobPending()) _ = try rt.executePendingJob();
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
     const rt: *quickjs.Runtime = try .init();
     defer rt.deinit();
 
@@ -81,9 +85,9 @@ pub fn main() !void {
 
     try UserService.register(ctx);
 
-    std.debug.print("=== Async Promises Example ===\n\n", .{});
+    try stdout.print("=== Async Promises Example ===\n\n", .{});
 
-    std.debug.print("1. Fetching user with ID 2...\n", .{});
+    try stdout.print("1. Fetching user with ID 2...\n", .{});
     const result1 = ctx.eval(
         \\fetchUser(2).then(user => {
         \\    globalThis.result = `Found: ${user.name} <${user.email}>`;
@@ -101,12 +105,13 @@ pub fn main() !void {
     defer output1.deinit(ctx);
     if (output1.toCString(ctx)) |str1| {
         defer ctx.freeCString(str1);
-        std.debug.print("   {s}\n\n", .{str1});
+        try stdout.print("   {s}\n\n", .{str1});
     } else {
-        std.debug.print("   undefined\n\n", .{});
+        try stdout.print("   undefined\n\n", .{});
     }
+    try stdout.flush();
 
-    std.debug.print("2. Fetching non-existent user (ID 99)...\n", .{});
+    try stdout.print("2. Fetching non-existent user (ID 99)...\n", .{});
     const result2 = ctx.eval(
         \\fetchUser(99).then(user => {
         \\    globalThis.result2 = `Found: ${user.name}`;
@@ -122,12 +127,13 @@ pub fn main() !void {
     defer output2.deinit(ctx);
     if (output2.toCString(ctx)) |str2| {
         defer ctx.freeCString(str2);
-        std.debug.print("   {s}\n\n", .{str2});
+        try stdout.print("   {s}\n\n", .{str2});
     } else {
-        std.debug.print("   undefined\n\n", .{});
+        try stdout.print("   undefined\n\n", .{});
     }
+    try stdout.flush();
 
-    std.debug.print("3. Using async/await syntax...\n", .{});
+    try stdout.print("3. Using async/await syntax...\n", .{});
     const result3 = ctx.eval(
         \\(async function() {
         \\    try {
@@ -147,12 +153,13 @@ pub fn main() !void {
     defer output3.deinit(ctx);
     if (output3.toCString(ctx)) |str3| {
         defer ctx.freeCString(str3);
-        std.debug.print("   {s}\n\n", .{str3});
+        try stdout.print("   {s}\n\n", .{str3});
     } else {
-        std.debug.print("   undefined\n\n", .{});
+        try stdout.print("   undefined\n\n", .{});
     }
+    try stdout.flush();
 
-    std.debug.print("4. Promise.all for parallel fetching...\n", .{});
+    try stdout.print("4. Promise.all for parallel fetching...\n", .{});
     const result4 = ctx.eval(
         \\Promise.all([fetchUser(1), fetchUser(2), fetchUser(3)])
         \\    .then(users => {
@@ -171,9 +178,9 @@ pub fn main() !void {
     defer output4.deinit(ctx);
     if (output4.toCString(ctx)) |str4| {
         defer ctx.freeCString(str4);
-        std.debug.print("   {s}\n", .{str4});
+        try stdout.print("   {s}\n", .{str4});
     } else {
-        std.debug.print("   undefined\n", .{});
+        try stdout.print("   undefined\n", .{});
     }
+    try stdout.flush();
 }
-

@@ -1,13 +1,17 @@
 const std = @import("std");
 const quickjs = @import("quickjs");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
     // Initialize the JavaScript runtime
-    const rt = try quickjs.Runtime.init();
+    const rt: *quickjs.Runtime = try .init();
     defer rt.deinit();
 
     // Create a JavaScript context
-    const ctx = try quickjs.Context.init(rt);
+    const ctx: *quickjs.Context = try .init(rt);
     defer ctx.deinit();
 
     // Evaluate JavaScript code
@@ -36,5 +40,6 @@ pub fn main() !void {
     const str = result.toCString(ctx) orelse return error.NotAString;
     defer ctx.freeCString(str);
 
-    std.debug.print("{s}\n", .{str});
+    try stdout.print("{s}\n", .{str});
+    try stdout.flush();
 }

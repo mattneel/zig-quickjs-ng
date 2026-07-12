@@ -63,6 +63,30 @@ pub const ModuleDef = opaque {
         return c.JS_SetModuleExport(ctx.cval(), @ptrCast(self), name.ptr, val.cval()) == 0;
     }
 
+    /// Associates a private value with this C module.
+    ///
+    /// Takes ownership of the value and replaces any previous private value.
+    ///
+    /// C: `JS_SetModulePrivateValue`
+    pub fn setPrivateValue(
+        self: *ModuleDef,
+        ctx: *Context,
+        val: Value,
+    ) error{JSError}!void {
+        if (c.JS_SetModulePrivateValue(ctx.cval(), self.cval(), val.cval()) < 0) {
+            return error.JSError;
+        }
+    }
+
+    /// Gets the private value associated with this C module.
+    ///
+    /// Returns a new Value that must be freed.
+    ///
+    /// C: `JS_GetModulePrivateValue`
+    pub fn getPrivateValue(self: *ModuleDef, ctx: *Context) Value {
+        return Value.fromCVal(c.JS_GetModulePrivateValue(ctx.cval(), self.cval()));
+    }
+
     /// Gets the import.meta object for this module.
     ///
     /// Returns a new Value that must be freed.
@@ -185,6 +209,48 @@ test "ModuleDef full module import via eval" {
     defer test_result.deinit(ctx);
 
     try testing.expectEqual(@as(i32, 123), try test_result.toInt32(ctx));
+}
+
+test "ModuleDef private value through module eval" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    const loader = struct {
+        fn load(_: void, load_ctx: *Context, name: [:0]const u8) ?*ModuleDef {
+            if (!std.mem.eql(u8, name, "private_module")) return null;
+
+            const module = ModuleDef.init(load_ctx, name, initFn) orelse return null;
+            if (!module.addExport(load_ctx, "privateValue")) return null;
+            module.setPrivateValue(
+                load_ctx,
+                Value.initString(load_ctx, "from private storage"),
+            ) catch return null;
+            return module;
+        }
+
+        fn initFn(init_ctx: *Context, module: *ModuleDef) bool {
+            const private_value = module.getPrivateValue(init_ctx);
+            return module.setExport(init_ctx, "privateValue", private_value);
+        }
+    };
+
+    rt.setModuleLoaderFunc(void, {}, null, loader.load);
+
+    const result = ctx.eval(
+        \\import { privateValue } from "private_module";
+        \\globalThis.privateModuleResult = privateValue;
+    , "<test>", .{ .type = .module });
+    defer result.deinit(ctx);
+    try testing.expect(!result.isException());
+
+    const private_result = ctx.eval("privateModuleResult", "<test>", .{});
+    defer private_result.deinit(ctx);
+    const str = private_result.toCString(ctx).?;
+    defer ctx.freeCString(str);
+    try testing.expectEqualStrings("from private storage", std.mem.span(str));
 }
 
 test "ModuleDef getImportMeta" {

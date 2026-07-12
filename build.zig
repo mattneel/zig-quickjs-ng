@@ -26,10 +26,10 @@ pub fn build(b: *std.Build) !void {
     // Tests
     const tests = b.addTest(.{
         .root_module = mod,
-        // Compiler crash without this.
+        // Zig 0.16 fails with splitType errors without LLVM.
         .use_llvm = true,
     });
-    tests.linkLibrary(lib);
+    tests.root_module.linkLibrary(lib);
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
@@ -64,12 +64,12 @@ pub fn library(
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .linkage = .static,
     });
-    lib.linkLibC();
 
-    lib.addIncludePath(upstream.path(""));
+    lib.root_module.addIncludePath(upstream.path(""));
     lib.installHeader(
         upstream.path("quickjs.h"),
         "quickjs.h",
@@ -84,10 +84,9 @@ pub fn library(
         "-fno-sanitize-trap=undefined",
         "-fvisibility=hidden",
     });
-    lib.addCSourceFiles(.{
+    lib.root_module.addCSourceFiles(.{
         .root = upstream.path(""),
         .files = &.{
-            "cutils.c",
             "dtoa.c",
             "libregexp.c",
             "libunicode.c",
