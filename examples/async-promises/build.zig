@@ -20,10 +20,10 @@ pub fn build(b: *std.Build) void {
                 .module = quickjs.module("quickjs"),
             }},
         }),
-        // Zig 0.15 crashes without this.
+        // Zig 0.16 fails with splitType errors without LLVM.
         .use_llvm = true,
     });
-    exe.linkLibrary(quickjs.artifact("quickjs-ng"));
+    exe.root_module.linkLibrary(quickjs.artifact("quickjs-ng"));
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
