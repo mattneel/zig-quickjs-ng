@@ -39,6 +39,7 @@ pub const Value = extern struct {
         big_int = c.JS_TAG_BIG_INT,
         symbol = c.JS_TAG_SYMBOL,
         string = c.JS_TAG_STRING,
+        string_rope = c.JS_TAG_STRING_ROPE,
         module = c.JS_TAG_MODULE,
         function_bytecode = c.JS_TAG_FUNCTION_BYTECODE,
         object = c.JS_TAG_OBJECT,
@@ -201,6 +202,18 @@ pub const Value = extern struct {
             initFloat64(@floatFromInt(val));
     }
 
+    /// Creates a JavaScript unsigned 64-bit integer value.
+    ///
+    /// If the value fits in an i32, creates an int value. Otherwise creates a float64.
+    ///
+    /// C: `JS_NewUint64`
+    pub fn initUint64(val: u64) Value {
+        return if (val <= std.math.maxInt(i32))
+            initInt32(@intCast(val))
+        else
+            initFloat64(@floatFromInt(val));
+    }
+
     /// Creates a JavaScript floating-point number value.
     ///
     /// C: `JS_NewFloat64`
@@ -246,6 +259,13 @@ pub const Value = extern struct {
     /// C: `JS_NewStringLen`
     pub fn initStringLen(ctx: *Context, str: []const u8) Value {
         return fromCVal(c.JS_NewStringLen(ctx.cval(), str.ptr, str.len));
+    }
+
+    /// Creates a JavaScript string from native-endian UTF-16 code units.
+    ///
+    /// C: `JS_NewStringUTF16`
+    pub fn initStringUTF16(ctx: *Context, str: []const u16) Value {
+        return fromCVal(c.JS_NewStringUTF16(ctx.cval(), str.ptr, str.len));
     }
 
     /// Creates an empty JavaScript object.
@@ -366,6 +386,7 @@ pub const Value = extern struct {
         cproto: cfunc.Proto,
         magic: i32,
         proto_val: Value,
+        n_fields: i32,
     ) Value {
         return fromCVal(c.JS_NewCFunction3(
             ctx.cval(),
@@ -375,6 +396,7 @@ pub const Value = extern struct {
             @intFromEnum(cproto),
             magic,
             proto_val.cval(),
+            n_fields,
         ));
     }
 
@@ -715,6 +737,15 @@ pub const Value = extern struct {
         return c.JS_IsArrayBuffer(self.cval());
     }
 
+    /// Checks whether an ArrayBuffer is immutable.
+    ///
+    /// C: `JS_IsImmutableArrayBuffer`
+    pub fn isImmutableArrayBuffer(self: Value) error{NotArrayBuffer}!bool {
+        const result = c.JS_IsImmutableArrayBuffer(self.cval());
+        if (result < 0) return error.NotArrayBuffer;
+        return result != 0;
+    }
+
     /// Checks if the value is a RegExp.
     ///
     /// C: `JS_IsRegExp`
@@ -773,6 +804,13 @@ pub const Value = extern struct {
         return c.JS_IsFunction(ctx.cval(), self.cval());
     }
 
+    /// Checks if the value is an async function.
+    ///
+    /// C: `JS_IsAsyncFunction`
+    pub fn isAsyncFunction(self: Value) bool {
+        return c.JS_IsAsyncFunction(self.cval());
+    }
+
     /// Checks if the value is a constructor.
     ///
     /// Requires context because this checks internal object state.
@@ -785,6 +823,18 @@ pub const Value = extern struct {
     // -----------------------------------------------------------------------
     // ArrayBuffer & TypedArray Operations
     // -----------------------------------------------------------------------
+
+    /// Sets whether an ArrayBuffer is immutable.
+    ///
+    /// C: `JS_SetImmutableArrayBuffer`
+    pub fn setImmutableArrayBuffer(
+        self: Value,
+        immutable: bool,
+    ) error{NotArrayBuffer}!void {
+        if (c.JS_SetImmutableArrayBuffer(self.cval(), immutable) < 0) {
+            return error.NotArrayBuffer;
+        }
+    }
 
     /// Detaches the ArrayBuffer, making it unusable.
     ///
@@ -1018,6 +1068,20 @@ pub const Value = extern struct {
         return c.JS_ToCString(ctx.cval(), self.cval());
     }
 
+    /// Converts the value to native-endian UTF-16 code units.
+    ///
+    /// Returns null if conversion fails. The returned slice is not null
+    /// terminated and must be freed with `Context.freeCStringUTF16` or
+    /// `Runtime.freeCStringUTF16`.
+    ///
+    /// C: `JS_ToCStringLenUTF16`
+    pub fn toCStringUTF16(self: Value, ctx: *Context) ?[]const u16 {
+        var len: usize = 0;
+        const ptr = c.JS_ToCStringLenUTF16(ctx.cval(), &len, self.cval());
+        if (ptr == null) return null;
+        return ptr[0..len];
+    }
+
     // -----------------------------------------------------------------------
     // Property Access
     // -----------------------------------------------------------------------
@@ -1144,8 +1208,10 @@ pub const Value = extern struct {
     /// `proto` as their prototype, and `proto.constructor` will be set to `func`.
     ///
     /// C: `JS_SetConstructor`
-    pub fn setConstructor(self: Value, ctx: *Context, proto: Value) void {
-        c.JS_SetConstructor(ctx.cval(), self.cval(), proto.cval());
+    pub fn setConstructor(self: Value, ctx: *Context, proto: Value) error{JSError}!void {
+        if (c.JS_SetConstructor(ctx.cval(), self.cval(), proto.cval()) < 0) {
+            return error.JSError;
+        }
     }
 
     /// Sets the constructor bit on a function object.
@@ -1611,6 +1677,21 @@ pub const Value = extern struct {
         return fromCVal(c.JS_PromiseResult(ctx.cval(), self.cval()));
     }
 
+    /// Creates an already-resolved or already-rejected Promise.
+    ///
+    /// C: `JS_NewSettledPromise`
+    pub fn initSettledPromise(
+        ctx: *Context,
+        settlement: PromiseSettlement,
+        value: Value,
+    ) Value {
+        return fromCVal(c.JS_NewSettledPromise(
+            ctx.cval(),
+            settlement == .rejected,
+            value.cval(),
+        ));
+    }
+
     /// A promise with its resolve/reject capability functions.
     pub const Promise = struct {
         value: Value,
@@ -1755,6 +1836,12 @@ pub const PromiseState = enum(c_int) {
     pending = 0,
     fulfilled = 1,
     rejected = 2,
+};
+
+/// Settlement used when creating an already-settled Promise.
+pub const PromiseSettlement = enum {
+    resolved,
+    rejected,
 };
 
 /// Property type, encoded in the `tmask` field of `PropertyFlags`.
@@ -1910,6 +1997,13 @@ comptime {
     assert(@alignOf(PropertyEnum) == @alignOf(c.JSPropertyEnum));
 }
 
+test "Value.Tag string_rope matches C constant" {
+    try testing.expectEqual(
+        @as(i64, c.JS_TAG_STRING_ROPE),
+        @intFromEnum(Value.Tag.string_rope),
+    );
+}
+
 test "constants match JavaScript values" {
     const rt: *Runtime = try .init();
     defer rt.deinit();
@@ -2041,6 +2135,43 @@ test "type predicates with JavaScript values" {
     try testing.expect(err.isError());
 }
 
+test "Value.isString recognizes string ropes" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    const rope = ctx.eval(
+        "'a'.repeat(8193) + 'b'",
+        "<test>",
+        .{},
+    );
+    defer rope.deinit(ctx);
+
+    try testing.expectEqual(
+        @as(c_int, c.JS_TAG_STRING_ROPE),
+        c.JS_VALUE_GET_TAG(rope.cval()),
+    );
+    try testing.expect(rope.isString());
+}
+
+test "Value.isAsyncFunction" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    const async_func = ctx.eval("(async function work() {})", "<test>", .{});
+    defer async_func.deinit(ctx);
+    try testing.expect(async_func.isAsyncFunction());
+
+    const sync_func = ctx.eval("(function work() {})", "<test>", .{});
+    defer sync_func.deinit(ctx);
+    try testing.expect(!sync_func.isAsyncFunction());
+}
+
 test "constructors create valid JavaScript values" {
     const rt: *Runtime = try .init();
     defer rt.deinit();
@@ -2084,6 +2215,18 @@ test "constructors create valid JavaScript values" {
     const uint32_large = Value.initUint32(std.math.maxInt(i32) + 1);
     try testing.expect(uint32_large.isNumber());
 
+    // initUint64 - too large for i32, becomes float
+    const uint64_large = Value.initUint64(std.math.maxInt(u64));
+    try testing.expect(uint64_large.isNumber());
+    try global.setPropertyStr(ctx, "uint64Value", uint64_large);
+    const uint64_check = ctx.eval(
+        "typeof uint64Value === 'number' && uint64Value > 4294967295",
+        "<test>",
+        .{},
+    );
+    defer uint64_check.deinit(ctx);
+    try testing.expect(try uint64_check.toBool(ctx));
+
     // initString
     const str_val = Value.initString(ctx, "hello");
     defer str_val.deinit(ctx);
@@ -2113,6 +2256,44 @@ test "constructors create valid JavaScript values" {
     const read_back = ctx.eval("testInt", "<test>", .{});
     defer read_back.deinit(ctx);
     try testing.expectEqual(@as(i32, 123), try read_back.toInt32(ctx));
+}
+
+test "UTF-16 strings round trip through JavaScript" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    const expected = [_]u16{ 'Z', 0, 0xd834, 0xdf06, 0xd800 };
+    const value = Value.initStringUTF16(ctx, &expected);
+    defer value.deinit(ctx);
+    try testing.expect(value.isString());
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    try global.setPropertyStr(ctx, "utf16Value", value.dup(ctx));
+
+    const result = ctx.eval(
+        \\Array.from({ length: utf16Value.length }, (_, index) =>
+        \\  utf16Value.charCodeAt(index)).join(',')
+    , "<test>", .{});
+    defer result.deinit(ctx);
+
+    const result_str = result.toCString(ctx).?;
+    defer ctx.freeCString(result_str);
+    try testing.expectEqualStrings(
+        "90,0,55348,57094,55296",
+        std.mem.span(result_str),
+    );
+
+    const context_units = value.toCStringUTF16(ctx).?;
+    defer ctx.freeCStringUTF16(context_units);
+    try testing.expectEqualSlices(u16, &expected, context_units);
+
+    const runtime_units = value.toCStringUTF16(ctx).?;
+    defer rt.freeCStringUTF16(runtime_units);
+    try testing.expectEqualSlices(u16, &expected, runtime_units);
 }
 
 test "conversions" {
@@ -2516,6 +2697,43 @@ test "Promise state" {
     try testing.expectEqual(PromiseState.not_a_promise, num.promiseState(ctx));
 }
 
+test "Value.initSettledPromise" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    const resolved = Value.initSettledPromise(ctx, .resolved, .initInt32(42));
+    defer resolved.deinit(ctx);
+    const rejected = Value.initSettledPromise(ctx, .rejected, .initInt32(7));
+    defer rejected.deinit(ctx);
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    try global.setPropertyStr(ctx, "resolved", resolved.dup(ctx));
+    try global.setPropertyStr(ctx, "rejected", rejected.dup(ctx));
+
+    const result = ctx.eval(
+        "resolved instanceof Promise && rejected instanceof Promise",
+        "<test>",
+        .{},
+    );
+    defer result.deinit(ctx);
+    try testing.expect(try result.toBool(ctx));
+
+    try testing.expectEqual(PromiseState.fulfilled, resolved.promiseState(ctx));
+    try testing.expectEqual(PromiseState.rejected, rejected.promiseState(ctx));
+
+    const resolved_value = resolved.promiseResult(ctx);
+    defer resolved_value.deinit(ctx);
+    try testing.expectEqual(@as(i32, 42), try resolved_value.toInt32(ctx));
+
+    const rejected_value = rejected.promiseResult(ctx);
+    defer rejected_value.deinit(ctx);
+    try testing.expectEqual(@as(i32, 7), try rejected_value.toInt32(ctx));
+}
+
 test "initPromiseCapability" {
     const rt: *Runtime = try .init();
     defer rt.deinit();
@@ -2876,6 +3094,40 @@ test "ArrayBuffer operations" {
     buf.?[0] = 42;
     const buf2 = ab.getArrayBuffer(ctx);
     try testing.expectEqual(@as(u8, 42), buf2.?[0]);
+}
+
+test "immutable ArrayBuffer operations" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    const buffer = ctx.eval("new ArrayBuffer(8)", "<test>", .{});
+    defer buffer.deinit(ctx);
+    try testing.expect(!(try buffer.isImmutableArrayBuffer()));
+
+    try buffer.setImmutableArrayBuffer(true);
+    try testing.expect(try buffer.isImmutableArrayBuffer());
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    try global.setPropertyStr(ctx, "immutableBuffer", buffer.dup(ctx));
+    const result = ctx.eval(
+        "new Uint8Array(immutableBuffer).byteLength === 8",
+        "<test>",
+        .{},
+    );
+    defer result.deinit(ctx);
+    try testing.expect(try result.toBool(ctx));
+
+    const object = ctx.eval("({})", "<test>", .{});
+    defer object.deinit(ctx);
+    try testing.expectError(error.NotArrayBuffer, object.isImmutableArrayBuffer());
+    try testing.expectError(
+        error.NotArrayBuffer,
+        object.setImmutableArrayBuffer(true),
+    );
 }
 
 test "ArrayBuffer from JavaScript" {
@@ -3263,8 +3515,20 @@ test "setConstructor" {
     const ctx: *Context = try .init(rt);
     defer ctx.deinit();
 
+    const function_proto = ctx.getFunctionProto();
+    defer function_proto.deinit(ctx);
+
     // Create a constructor function using generic (constructor_or_func allows both new and call)
-    const ctor = Value.initCFunction2(ctx, &testConstructor, "Point", 2, .constructor_or_func, 0);
+    const ctor = Value.initCFunction3(
+        ctx,
+        &testConstructor,
+        "Point",
+        2,
+        .constructor_or_func,
+        0,
+        function_proto,
+        3,
+    );
     defer ctor.deinit(ctx);
 
     // Create prototype with method
@@ -3277,7 +3541,7 @@ test "setConstructor" {
     try proto.setPropertyFunctionList(ctx, &protoList);
 
     // Link constructor and prototype
-    ctor.setConstructor(ctx, proto);
+    try ctor.setConstructor(ctx, proto);
 
     // Register as global
     const global = ctx.getGlobalObject();
@@ -3295,6 +3559,27 @@ test "setConstructor" {
     defer ctorCheck.deinit(ctx);
     try testing.expect(!ctorCheck.isException());
     try testing.expect(try ctorCheck.toBool(ctx));
+}
+
+test "setConstructor reports JavaScript errors" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    const proto = Value.initObject(ctx);
+    defer proto.deinit(ctx);
+
+    try testing.expectError(
+        error.JSError,
+        Value.initInt32(1).setConstructor(ctx, proto),
+    );
+    try testing.expect(ctx.hasException());
+
+    const exception = ctx.getException();
+    defer exception.deinit(ctx);
+    try testing.expect(exception.isError());
 }
 
 fn testConstructor(ctx_opt: ?*Context, this_val: Value, args: []const c.JSValue) Value {

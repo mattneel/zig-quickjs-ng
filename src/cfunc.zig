@@ -1,7 +1,9 @@
 const std = @import("std");
 const testing = std.testing;
 const c = @import("quickjs_c");
+const Atom = @import("atom.zig").Atom;
 const Context = @import("context.zig").Context;
+const Runtime = @import("runtime.zig").Runtime;
 const Value = @import("value.zig").Value;
 const opaquepkg = @import("opaque.zig");
 const Opaque = opaquepkg.Opaque;
@@ -293,6 +295,8 @@ pub const DefType = enum(u8) {
     prop_undefined = c.JS_DEF_PROP_UNDEFINED,
     object = c.JS_DEF_OBJECT,
     alias = c.JS_DEF_ALIAS,
+    prop_symbol = c.JS_DEF_PROP_SYMBOL,
+    prop_bool = c.JS_DEF_PROP_BOOL,
 };
 
 /// Property flags for function list entries.
@@ -463,6 +467,36 @@ pub const FunctionListEntryHelpers = struct {
         entry.u.i32 = 0;
         return entry;
     }
+
+    /// Creates a property whose value is the symbol represented by `value`.
+    pub fn propSymbol(
+        name: [:0]const u8,
+        value: Atom,
+        flags: PropFlags,
+    ) FunctionListEntry {
+        var entry: FunctionListEntry = std.mem.zeroes(FunctionListEntry);
+        entry.name = name.ptr;
+        entry.prop_flags = @bitCast(flags);
+        entry.def_type = @intFromEnum(DefType.prop_symbol);
+        entry.magic = 0;
+        entry.u.i32 = @bitCast(@intFromEnum(value));
+        return entry;
+    }
+
+    /// Creates a boolean property definition.
+    pub fn propBool(
+        name: [:0]const u8,
+        value: bool,
+        flags: PropFlags,
+    ) FunctionListEntry {
+        var entry: FunctionListEntry = std.mem.zeroes(FunctionListEntry);
+        entry.name = name.ptr;
+        entry.prop_flags = @bitCast(flags);
+        entry.def_type = @intFromEnum(DefType.prop_bool);
+        entry.magic = 0;
+        entry.u.i32 = @intFromBool(value);
+        return entry;
+    }
 };
 
 test "Proto enum matches C constants" {
@@ -492,6 +526,8 @@ test "DefType enum matches C constants" {
     try testing.expectEqual(@as(u8, c.JS_DEF_PROP_UNDEFINED), @intFromEnum(DefType.prop_undefined));
     try testing.expectEqual(@as(u8, c.JS_DEF_OBJECT), @intFromEnum(DefType.object));
     try testing.expectEqual(@as(u8, c.JS_DEF_ALIAS), @intFromEnum(DefType.alias));
+    try testing.expectEqual(@as(u8, c.JS_DEF_PROP_SYMBOL), @intFromEnum(DefType.prop_symbol));
+    try testing.expectEqual(@as(u8, c.JS_DEF_PROP_BOOL), @intFromEnum(DefType.prop_bool));
 }
 
 test "PropFlags matches C constants" {
@@ -506,4 +542,40 @@ test "PropFlags matches C constants" {
 
     const default_flags: PropFlags = PropFlags.default;
     try testing.expectEqual(@as(u8, c.JS_PROP_WRITABLE | c.JS_PROP_CONFIGURABLE), @as(u8, @bitCast(default_flags)));
+}
+
+test "FunctionListEntry symbol and bool properties work in JavaScript" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    const symbol = ctx.eval("Symbol.for('entry-symbol')", "<test>", .{});
+    defer symbol.deinit(ctx);
+    const symbol_atom = Atom.fromValue(ctx, symbol);
+    defer symbol_atom.deinit(ctx);
+
+    const object = Value.initObject(ctx);
+    defer object.deinit(ctx);
+    const entries = [_]FunctionListEntry{
+        FunctionListEntryHelpers.propSymbol(
+            "symbolValue",
+            symbol_atom,
+            PropFlags.default,
+        ),
+        FunctionListEntryHelpers.propBool("enabled", true, PropFlags.default),
+    };
+    try object.setPropertyFunctionList(ctx, &entries);
+
+    const global = ctx.getGlobalObject();
+    defer global.deinit(ctx);
+    try global.setPropertyStr(ctx, "entryObject", object.dup(ctx));
+
+    const result = ctx.eval(
+        \\entryObject.enabled === true &&
+        \\  entryObject.symbolValue === Symbol.for('entry-symbol')
+    , "<test>", .{});
+    defer result.deinit(ctx);
+    try testing.expect(try result.toBool(ctx));
 }

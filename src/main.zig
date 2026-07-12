@@ -17,6 +17,7 @@ pub const Runtime = runtime.Runtime;
 pub const DumpFlags = runtime.DumpFlags;
 pub const Value = value.Value;
 pub const Promise = value.Value.Promise;
+pub const PromiseSettlement = value.PromiseSettlement;
 pub const PromiseState = value.PromiseState;
 pub const ClassId = class.Id;
 pub const ClassDef = class.Def;
