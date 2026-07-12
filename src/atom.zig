@@ -71,11 +71,29 @@ pub const Atom = enum(u32) {
         c.JS_FreeAtom(ctx.cval(), @intFromEnum(self));
     }
 
+    /// Frees multiple atoms.
+    ///
+    /// Each atom is freed with `deinit` and must not be used afterward.
+    ///
+    /// C: `JS_FreeAtoms`
+    pub fn deinitMany(ctx: *Context, atoms: []const Atom) void {
+        for (atoms) |atom| atom.deinit(ctx);
+    }
+
     /// Frees the atom using the runtime, decrementing its reference count.
     ///
     /// C: `JS_FreeAtomRT`
     pub fn deinitRT(self: Atom, rt: *Runtime) void {
         c.JS_FreeAtomRT(rt.cval(), @intFromEnum(self));
+    }
+
+    /// Frees multiple atoms using the runtime.
+    ///
+    /// Each atom is freed with `deinitRT` and must not be used afterward.
+    ///
+    /// C: `JS_FreeAtomsRT`
+    pub fn deinitManyRT(rt: *Runtime, atoms: []const Atom) void {
+        for (atoms) |atom| atom.deinitRT(rt);
     }
 
     /// Converts the atom to a JavaScript value (symbol).
@@ -231,6 +249,54 @@ test "Atom dupRT and deinitRT" {
     defer atom2.deinitRT(rt);
 
     try testing.expectEqual(@intFromEnum(atom1), @intFromEnum(atom2));
+}
+
+test "Atom.deinitMany" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    var values: [9]Value = undefined;
+    var atoms: [9]Atom = undefined;
+    for (&values, &atoms, 0..) |*value, *atom, index| {
+        const input: []const u8 = if (index % 2 == 0)
+            "'bulk atom'"
+        else
+            "({ atomSource: true })";
+        value.* = ctx.eval(input, "<test>", .{});
+        try testing.expect(!value.isException());
+        atom.* = .fromValue(ctx, value.*);
+        try testing.expect(atom.* != .null);
+    }
+
+    for (values) |value| value.deinit(ctx);
+    Atom.deinitMany(ctx, &atoms);
+}
+
+test "Atom.deinitManyRT" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    var values: [9]Value = undefined;
+    var atoms: [9]Atom = undefined;
+    for (&values, &atoms, 0..) |*value, *atom, index| {
+        const input: []const u8 = if (index % 2 == 0)
+            "'runtime bulk atom'"
+        else
+            "({ runtimeAtomSource: true })";
+        value.* = ctx.eval(input, "<test>", .{});
+        try testing.expect(!value.isException());
+        atom.* = .fromValue(ctx, value.*);
+        try testing.expect(atom.* != .null);
+    }
+
+    for (values) |value| value.deinit(ctx);
+    Atom.deinitManyRT(rt, &atoms);
 }
 
 test "Atom toValue" {
