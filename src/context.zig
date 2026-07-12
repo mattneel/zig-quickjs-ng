@@ -98,6 +98,13 @@ pub const Context = opaque {
         c.JS_FreeCString(self.cval(), ptr);
     }
 
+    /// Frees a UTF-16 C string allocated by QuickJS.
+    ///
+    /// C: `JS_FreeCStringUTF16`
+    pub fn freeCStringUTF16(self: *Context, str: []const u16) void {
+        c.JS_FreeCStringUTF16(self.cval(), str.ptr);
+    }
+
     /// Throws an out of memory exception.
     ///
     /// C: `JS_ThrowOutOfMemory`
@@ -299,22 +306,22 @@ pub const Context = opaque {
     /// Adds base objects (Object, Function, Array, etc.).
     ///
     /// C: `JS_AddIntrinsicBaseObjects`
-    pub fn addIntrinsicBaseObjects(self: *Context) void {
-        c.JS_AddIntrinsicBaseObjects(self.cval());
+    pub fn addIntrinsicBaseObjects(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicBaseObjects(self.cval()) < 0) return error.JSError;
     }
 
     /// Adds the Date constructor and prototype.
     ///
     /// C: `JS_AddIntrinsicDate`
-    pub fn addIntrinsicDate(self: *Context) void {
-        c.JS_AddIntrinsicDate(self.cval());
+    pub fn addIntrinsicDate(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicDate(self.cval()) < 0) return error.JSError;
     }
 
     /// Adds eval() function.
     ///
     /// C: `JS_AddIntrinsicEval`
-    pub fn addIntrinsicEval(self: *Context) void {
-        c.JS_AddIntrinsicEval(self.cval());
+    pub fn addIntrinsicEval(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicEval(self.cval()) < 0) return error.JSError;
     }
 
     /// Adds RegExp compiler (needed for literal regexp support).
@@ -327,71 +334,78 @@ pub const Context = opaque {
     /// Adds the RegExp constructor and prototype.
     ///
     /// C: `JS_AddIntrinsicRegExp`
-    pub fn addIntrinsicRegExp(self: *Context) void {
-        c.JS_AddIntrinsicRegExp(self.cval());
+    pub fn addIntrinsicRegExp(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicRegExp(self.cval()) < 0) return error.JSError;
     }
 
     /// Adds JSON object with parse() and stringify().
     ///
     /// C: `JS_AddIntrinsicJSON`
-    pub fn addIntrinsicJSON(self: *Context) void {
-        c.JS_AddIntrinsicJSON(self.cval());
+    pub fn addIntrinsicJSON(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicJSON(self.cval()) < 0) return error.JSError;
     }
 
     /// Adds the Proxy constructor and Reflect object.
     ///
     /// C: `JS_AddIntrinsicProxy`
-    pub fn addIntrinsicProxy(self: *Context) void {
-        c.JS_AddIntrinsicProxy(self.cval());
+    pub fn addIntrinsicProxy(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicProxy(self.cval()) < 0) return error.JSError;
     }
 
     /// Adds Map and Set constructors and prototypes.
     ///
     /// C: `JS_AddIntrinsicMapSet`
-    pub fn addIntrinsicMapSet(self: *Context) void {
-        c.JS_AddIntrinsicMapSet(self.cval());
+    pub fn addIntrinsicMapSet(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicMapSet(self.cval()) < 0) return error.JSError;
     }
 
     /// Adds TypedArray and ArrayBuffer constructors.
     ///
     /// C: `JS_AddIntrinsicTypedArrays`
-    pub fn addIntrinsicTypedArrays(self: *Context) void {
-        c.JS_AddIntrinsicTypedArrays(self.cval());
+    pub fn addIntrinsicTypedArrays(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicTypedArrays(self.cval()) < 0) return error.JSError;
     }
 
     /// Adds Promise constructor and related functions.
     ///
     /// C: `JS_AddIntrinsicPromise`
-    pub fn addIntrinsicPromise(self: *Context) void {
-        c.JS_AddIntrinsicPromise(self.cval());
+    pub fn addIntrinsicPromise(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicPromise(self.cval()) < 0) return error.JSError;
     }
 
     /// Adds BigInt constructor and prototype.
     ///
     /// C: `JS_AddIntrinsicBigInt`
-    pub fn addIntrinsicBigInt(self: *Context) void {
-        c.JS_AddIntrinsicBigInt(self.cval());
+    pub fn addIntrinsicBigInt(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicBigInt(self.cval()) < 0) return error.JSError;
     }
 
     /// Adds WeakRef and FinalizationRegistry.
     ///
     /// C: `JS_AddIntrinsicWeakRef`
-    pub fn addIntrinsicWeakRef(self: *Context) void {
-        c.JS_AddIntrinsicWeakRef(self.cval());
+    pub fn addIntrinsicWeakRef(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicWeakRef(self.cval()) < 0) return error.JSError;
     }
 
     /// Adds performance object with now().
     ///
     /// C: `JS_AddPerformance`
-    pub fn addPerformance(self: *Context) void {
-        c.JS_AddPerformance(self.cval());
+    pub fn addPerformance(self: *Context) error{JSError}!void {
+        if (c.JS_AddPerformance(self.cval()) < 0) return error.JSError;
     }
 
     /// Adds DOMException constructor.
     ///
     /// C: `JS_AddIntrinsicDOMException`
-    pub fn addIntrinsicDOMException(self: *Context) void {
-        c.JS_AddIntrinsicDOMException(self.cval());
+    pub fn addIntrinsicDOMException(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicDOMException(self.cval()) < 0) return error.JSError;
+    }
+
+    /// Adds the atob() and btoa() functions.
+    ///
+    /// C: `JS_AddIntrinsicAToB`
+    pub fn addIntrinsicAToB(self: *Context) error{JSError}!void {
+        if (c.JS_AddIntrinsicAToB(self.cval()) < 0) return error.JSError;
     }
 
     // =========================================================================
@@ -651,7 +665,7 @@ test "Context addIntrinsicBaseObjects" {
     defer ctx.deinit();
 
     // Just test that the method doesn't crash
-    ctx.addIntrinsicBaseObjects();
+    try ctx.addIntrinsicBaseObjects();
 }
 
 test "Context addIntrinsicDate" {
@@ -674,8 +688,8 @@ test "Context addIntrinsicEval" {
     const ctx: *Context = try .initRaw(rt);
     defer ctx.deinit();
 
-    ctx.addIntrinsicBaseObjects();
-    ctx.addIntrinsicEval();
+    try ctx.addIntrinsicBaseObjects();
+    try ctx.addIntrinsicEval();
 
     // eval() should work now
     const result = ctx.eval("eval('2 + 3')", "<test>", .{});
@@ -730,11 +744,14 @@ test "Context addIntrinsicBigInt" {
     const rt: *Runtime = try .init();
     defer rt.deinit();
 
-    const ctx: *Context = try .init(rt);
+    const ctx: *Context = try .initRaw(rt);
     defer ctx.deinit();
 
+    try ctx.addIntrinsicEval();
+    try ctx.addIntrinsicBigInt();
+
     // BigInt should work
-    const result = ctx.eval("BigInt(9007199254740991)", "<test>", .{});
+    const result = ctx.eval("9007199254740991n", "<test>", .{});
     defer result.deinit(ctx);
     try std.testing.expect(result.isBigInt());
 }
@@ -806,6 +823,31 @@ test "Context addPerformance" {
     const str2 = result2.toCString(ctx).?;
     defer ctx.freeCString(str2);
     try std.testing.expectEqualStrings("number", std.mem.span(str2));
+}
+
+test "Context addIntrinsicAToB" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .initRaw(rt);
+    defer ctx.deinit();
+
+    try ctx.addIntrinsicBaseObjects();
+    try ctx.addIntrinsicEval();
+    try ctx.addIntrinsicDOMException();
+    try ctx.addIntrinsicAToB();
+
+    const result = ctx.eval(
+        "atob('SGVsbG8=') + ':' + btoa('zig')",
+        "<test>",
+        .{},
+    );
+    defer result.deinit(ctx);
+    try std.testing.expect(!result.isException());
+
+    const str = result.toCString(ctx).?;
+    defer ctx.freeCString(str);
+    try std.testing.expectEqualStrings("Hello:emln", std.mem.span(str));
 }
 
 test "Context getFunctionProto" {
@@ -1068,10 +1110,19 @@ test "Context raw with selective intrinsics" {
     defer ctx.deinit();
 
     // Test that we can add multiple intrinsics without crashing
-    ctx.addIntrinsicBaseObjects();
-    ctx.addIntrinsicJSON();
-    ctx.addIntrinsicDate();
-    ctx.addIntrinsicPromise();
+    try ctx.addIntrinsicBaseObjects();
+    try ctx.addIntrinsicDate();
+    try ctx.addIntrinsicEval();
+    try ctx.addIntrinsicRegExp();
+    try ctx.addIntrinsicJSON();
+    try ctx.addIntrinsicProxy();
+    try ctx.addIntrinsicMapSet();
+    try ctx.addIntrinsicTypedArrays();
+    try ctx.addIntrinsicPromise();
+    try ctx.addIntrinsicWeakRef();
+    try ctx.addPerformance();
+    try ctx.addIntrinsicDOMException();
+    try ctx.addIntrinsicAToB();
 
     // The context should still be valid
     try std.testing.expectEqual(rt, ctx.getRuntime());

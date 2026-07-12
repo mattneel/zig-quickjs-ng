@@ -87,7 +87,6 @@ pub fn library(
     lib.root_module.addCSourceFiles(.{
         .root = upstream.path(""),
         .files = &.{
-            "cutils.c",
             "dtoa.c",
             "libregexp.c",
             "libunicode.c",

@@ -77,6 +77,13 @@ pub const Runtime = opaque {
         c.JS_FreeRuntime(self.cval());
     }
 
+    /// Frees a UTF-16 C string allocated by QuickJS.
+    ///
+    /// C: `JS_FreeCStringRT_UTF16`
+    pub fn freeCStringUTF16(self: *Runtime, str: []const u16) void {
+        c.JS_FreeCStringRT_UTF16(self.cval(), str.ptr);
+    }
+
     /// Creates a new JavaScript context within this runtime.
     ///
     /// The context must be freed with `Context.deinit` when no longer needed.
@@ -310,6 +317,39 @@ pub const Runtime = opaque {
         return *const fn (Opaque(T), *Context, [:0]const u8) ?*ModuleDef;
     }
 
+    /// Attributes-aware module name normalization function type.
+    ///
+    /// The attributes value is borrowed for the duration of the callback.
+    pub fn ModuleNormalizeFunc2(comptime T: type) type {
+        return *const fn (
+            Opaque(T),
+            *Context,
+            [:0]const u8,
+            [:0]const u8,
+            Value,
+        ) ?[*:0]u8;
+    }
+
+    /// Attributes-aware module loader function type.
+    ///
+    /// The attributes value is borrowed for the duration of the callback.
+    pub fn ModuleLoaderFunc2(comptime T: type) type {
+        return *const fn (
+            Opaque(T),
+            *Context,
+            [:0]const u8,
+            Value,
+        ) ?*ModuleDef;
+    }
+
+    /// Import-attributes validation callback type.
+    ///
+    /// Return true when the attributes are supported. Return false after
+    /// setting a pending exception to reject them.
+    pub fn ModuleCheckSupportedImportAttributes(comptime T: type) type {
+        return *const fn (Opaque(T), *Context, Value) bool;
+    }
+
     /// Sets the module loader functions.
     ///
     /// module_normalize can be null to use the default normalizer.
@@ -361,6 +401,116 @@ pub const Runtime = opaque {
         );
     }
 
+    /// Sets module loader functions with import-attributes support.
+    ///
+    /// The normalizer here has the original signature. Call
+    /// `setModuleNormalizeFunc2` afterward to install an attributes-aware
+    /// normalizer.
+    ///
+    /// C: `JS_SetModuleLoaderFunc2`
+    pub fn setModuleLoaderFunc2(
+        self: *Runtime,
+        comptime T: type,
+        userdata: Opaque(T),
+        comptime module_normalize: ?ModuleNormalizeFunc(T),
+        comptime module_loader: ?ModuleLoaderFunc2(T),
+        comptime module_check_attrs: ?ModuleCheckSupportedImportAttributes(T),
+    ) void {
+        const Wrapper = struct {
+            fn normCallback(
+                ctx: *Context,
+                module_base_name: [*:0]const u8,
+                module_name: [*:0]const u8,
+                inner_userdata: ?*anyopaque,
+            ) callconv(.c) ?[*:0]u8 {
+                const norm = module_normalize orelse return null;
+                return @call(.always_inline, norm, .{
+                    opaquepkg.fromC(T, inner_userdata),
+                    ctx,
+                    std.mem.span(module_base_name),
+                    std.mem.span(module_name),
+                });
+            }
+
+            fn loadCallback(
+                ctx: ?*c.JSContext,
+                module_name: [*c]const u8,
+                inner_userdata: ?*anyopaque,
+                attributes: c.JSValue,
+            ) callconv(.c) ?*c.JSModuleDef {
+                const loader = module_loader orelse return null;
+                const module = @call(.always_inline, loader, .{
+                    opaquepkg.fromC(T, inner_userdata),
+                    @as(*Context, @ptrCast(ctx)),
+                    std.mem.span(@as([*:0]const u8, @ptrCast(module_name))),
+                    Value.fromCVal(attributes),
+                });
+                return @ptrCast(module);
+            }
+
+            fn checkAttrsCallback(
+                ctx: ?*c.JSContext,
+                inner_userdata: ?*anyopaque,
+                attributes: c.JSValue,
+            ) callconv(.c) c_int {
+                const check = module_check_attrs orelse return 0;
+                const supported = @call(.always_inline, check, .{
+                    opaquepkg.fromC(T, inner_userdata),
+                    @as(*Context, @ptrCast(ctx)),
+                    Value.fromCVal(attributes),
+                });
+                return if (supported) 0 else -1;
+            }
+        };
+
+        c.JS_SetModuleLoaderFunc2(
+            self.cval(),
+            if (module_normalize != null) @ptrCast(&Wrapper.normCallback) else null,
+            if (module_loader != null) &Wrapper.loadCallback else null,
+            if (module_check_attrs != null)
+                &Wrapper.checkAttrsCallback
+            else
+                null,
+            opaquepkg.toC(T, userdata),
+        );
+    }
+
+    /// Sets an attributes-aware module normalizer.
+    ///
+    /// Call after `setModuleLoaderFunc2`, using the same userdata type.
+    ///
+    /// C: `JS_SetModuleNormalizeFunc2`
+    pub fn setModuleNormalizeFunc2(
+        self: *Runtime,
+        comptime T: type,
+        comptime module_normalize: ?ModuleNormalizeFunc2(T),
+    ) void {
+        const Wrapper = struct {
+            fn normCallback(
+                ctx: ?*c.JSContext,
+                module_base_name: [*c]const u8,
+                module_name: [*c]const u8,
+                attributes: c.JSValue,
+                inner_userdata: ?*anyopaque,
+            ) callconv(.c) [*c]u8 {
+                const norm = module_normalize orelse return null;
+                const normalized = @call(.always_inline, norm, .{
+                    opaquepkg.fromC(T, inner_userdata),
+                    @as(*Context, @ptrCast(ctx)),
+                    std.mem.span(@as([*:0]const u8, @ptrCast(module_base_name))),
+                    std.mem.span(@as([*:0]const u8, @ptrCast(module_name))),
+                    Value.fromCVal(attributes),
+                }) orelse return null;
+                return normalized;
+            }
+        };
+
+        c.JS_SetModuleNormalizeFunc2(
+            self.cval(),
+            if (module_normalize != null) &Wrapper.normCallback else null,
+        );
+    }
+
     // =========================================================================
     // Class Definition
     // =========================================================================
@@ -402,6 +552,15 @@ pub const Runtime = opaque {
     /// C: `JS_IsJobPending`
     pub fn isJobPending(self: *Runtime) bool {
         return c.JS_IsJobPending(self.cval());
+    }
+
+    /// Gets the context associated with the next pending job.
+    ///
+    /// The returned context is borrowed and remains owned by the runtime.
+    ///
+    /// C: `JS_GetPendingJobContext`
+    pub fn getPendingJobContext(self: *Runtime) ?*Context {
+        return @ptrCast(c.JS_GetPendingJobContext(self.cval()));
     }
 
     /// Executes a pending job from the job queue.
@@ -616,7 +775,17 @@ pub const DumpFlags = packed struct(u64) {
     objects: bool = false,
     atoms: bool = false,
     shapes: bool = false,
-    _padding: u44 = 0,
+    _abort_on_leaks: bool = false,
+    _padding: u43 = 0,
+
+    /// Aborts when atom, object, or string leaks are detected.
+    ///
+    /// C: `JS_ABORT_ON_LEAKS`
+    pub const abort_on_leaks: DumpFlags = .{
+        .leaks = true,
+        .atom_leaks = true,
+        ._abort_on_leaks = true,
+    };
 };
 
 test "Runtime init and deinit" {
@@ -797,7 +966,7 @@ test "Runtime setInterruptHandler" {
     rt.setInterruptHandler(State, null, null);
 }
 
-test "Runtime isJobPending with promises" {
+test "Runtime getPendingJobContext with promises" {
     const rt: *Runtime = try .init();
     defer rt.deinit();
 
@@ -806,6 +975,7 @@ test "Runtime isJobPending with promises" {
 
     // No jobs initially
     try std.testing.expect(!rt.isJobPending());
+    try std.testing.expectEqual(@as(?*Context, null), rt.getPendingJobContext());
 
     // Create a resolved promise - this schedules a job
     const result = ctx.eval("Promise.resolve(42).then(x => x * 2)", "<test>", .{});
@@ -814,6 +984,93 @@ test "Runtime isJobPending with promises" {
 
     // Now there should be a pending job
     try std.testing.expect(rt.isJobPending());
+    try std.testing.expectEqual(ctx, rt.getPendingJobContext().?);
+}
+
+test "Runtime import-attributes module loader" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    const State = struct {
+        normalize_calls: usize = 0,
+        loader_calls: usize = 0,
+        check_calls: usize = 0,
+
+        fn hasExpectedAttribute(inner_ctx: *Context, attributes: Value) bool {
+            const flavor = attributes.getPropertyStr(inner_ctx, "flavor");
+            defer flavor.deinit(inner_ctx);
+            const str = flavor.toCString(inner_ctx) orelse return false;
+            defer inner_ctx.freeCString(str);
+            return std.mem.eql(u8, std.mem.span(str), "zig");
+        }
+
+        fn normalize(
+            self: ?*@This(),
+            inner_ctx: *Context,
+            _: [:0]const u8,
+            module_name: [:0]const u8,
+            attributes: Value,
+        ) ?[*:0]u8 {
+            if (!hasExpectedAttribute(inner_ctx, attributes)) return null;
+            self.?.normalize_calls += 1;
+            const normalized = c.js_strdup(inner_ctx.cval(), module_name.ptr);
+            if (normalized == null) return null;
+            return @ptrCast(normalized);
+        }
+
+        fn load(
+            self: ?*@This(),
+            inner_ctx: *Context,
+            module_name: [:0]const u8,
+            attributes: Value,
+        ) ?*ModuleDef {
+            if (!std.mem.eql(u8, module_name, "attr_module")) return null;
+            if (!hasExpectedAttribute(inner_ctx, attributes)) return null;
+            self.?.loader_calls += 1;
+
+            const module = ModuleDef.init(inner_ctx, module_name, initModule) orelse
+                return null;
+            if (!module.addExport(inner_ctx, "value")) return null;
+            return module;
+        }
+
+        fn check(
+            self: ?*@This(),
+            inner_ctx: *Context,
+            attributes: Value,
+        ) bool {
+            self.?.check_calls += 1;
+            return hasExpectedAttribute(inner_ctx, attributes);
+        }
+
+        fn initModule(inner_ctx: *Context, module: *ModuleDef) bool {
+            return module.setExport(inner_ctx, "value", .initInt32(321));
+        }
+    };
+
+    var state: State = .{};
+    rt.setModuleLoaderFunc2(State, &state, null, State.load, State.check);
+    rt.setModuleNormalizeFunc2(State, State.normalize);
+
+    const result = ctx.eval(
+        \\import { value } from "attr_module" with { flavor: "zig" };
+        \\globalThis.attributeResult = value;
+    , "<test>", .{ .type = .module });
+    defer result.deinit(ctx);
+    try std.testing.expect(!result.isException());
+
+    const attribute_result = ctx.eval("attributeResult", "<test>", .{});
+    defer attribute_result.deinit(ctx);
+    try std.testing.expectEqual(
+        @as(i32, 321),
+        try attribute_result.toInt32(ctx),
+    );
+    try std.testing.expect(state.normalize_calls > 0);
+    try std.testing.expect(state.loader_calls > 0);
+    try std.testing.expect(state.check_calls > 0);
 }
 
 test "Runtime executePendingJob" {
@@ -935,6 +1192,10 @@ test "DumpFlags bit layout matches C header" {
     try testing.expectEqual(c.JS_DUMP_OBJECTS, @as(u64, @bitCast(DumpFlags{ .objects = true })));
     try testing.expectEqual(c.JS_DUMP_ATOMS, @as(u64, @bitCast(DumpFlags{ .atoms = true })));
     try testing.expectEqual(c.JS_DUMP_SHAPES, @as(u64, @bitCast(DumpFlags{ .shapes = true })));
+    try testing.expectEqual(
+        @as(u64, c.JS_ABORT_ON_LEAKS),
+        @as(u64, @bitCast(DumpFlags.abort_on_leaks)),
+    );
 
     // Combined flags
     try testing.expectEqual(
