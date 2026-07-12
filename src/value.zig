@@ -586,11 +586,29 @@ pub const Value = extern struct {
         c.JS_FreeValue(ctx.cval(), self.cval());
     }
 
+    /// Frees multiple JavaScript values.
+    ///
+    /// Each value is freed with `deinit` and must not be used afterward.
+    ///
+    /// C: `JS_FreeValues`
+    pub fn deinitMany(ctx: *Context, values: []const Value) void {
+        for (values) |value| value.deinit(ctx);
+    }
+
     /// Frees the JavaScript value using the runtime.
     ///
     /// C: `JS_FreeValueRT`
     pub fn deinitRT(self: Value, rt: *Runtime) void {
         c.JS_FreeValueRT(rt.cval(), self.cval());
+    }
+
+    /// Frees multiple JavaScript values using the runtime.
+    ///
+    /// Each value is freed with `deinitRT` and must not be used afterward.
+    ///
+    /// C: `JS_FreeValuesRT`
+    pub fn deinitManyRT(rt: *Runtime, values: []const Value) void {
+        for (values) |value| value.deinitRT(rt);
     }
 
     // -----------------------------------------------------------------------
@@ -2294,6 +2312,46 @@ test "UTF-16 strings round trip through JavaScript" {
     const runtime_units = value.toCStringUTF16(ctx).?;
     defer rt.freeCStringUTF16(runtime_units);
     try testing.expectEqualSlices(u16, &expected, runtime_units);
+}
+
+test "Value.deinitMany" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    var values: [9]Value = undefined;
+    for (&values, 0..) |*value, index| {
+        const input: []const u8 = if (index % 2 == 0)
+            "'bulk string'"
+        else
+            "({ nested: {} })";
+        value.* = ctx.eval(input, "<test>", .{});
+        try testing.expect(!value.isException());
+    }
+
+    Value.deinitMany(ctx, &values);
+}
+
+test "Value.deinitManyRT" {
+    const rt: *Runtime = try .init();
+    defer rt.deinit();
+
+    const ctx: *Context = try .init(rt);
+    defer ctx.deinit();
+
+    var values: [9]Value = undefined;
+    for (&values, 0..) |*value, index| {
+        const input: []const u8 = if (index % 2 == 0)
+            "'runtime bulk string'"
+        else
+            "({ runtimeNested: {} })";
+        value.* = ctx.eval(input, "<test>", .{});
+        try testing.expect(!value.isException());
+    }
+
+    Value.deinitManyRT(rt, &values);
 }
 
 test "conversions" {
